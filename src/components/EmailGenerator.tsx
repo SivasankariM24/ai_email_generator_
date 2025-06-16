@@ -8,8 +8,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Mail, Send, Copy, CheckCircle } from 'lucide-react';
+import { Loader2, Mail, Send, Copy, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { generateEmailWithGemini } from '../services/aiService';
 import { generateEmail } from '../utils/emailTemplates';
 
 interface EmailForm {
@@ -29,6 +30,7 @@ const EmailGenerator = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedEmail, setGeneratedEmail] = useState('');
   const [generationStatus, setGenerationStatus] = useState('');
+  const [usedAI, setUsedAI] = useState<'gemini' | 'template' | null>(null);
   const [form, setForm] = useState<EmailForm>({
     purpose: 'thank_you',
     emailType: 'casual',
@@ -38,7 +40,7 @@ const EmailGenerator = () => {
     subject: 'Thank you for the birthday gift',
     additionalInfo: 'Thank you for the beautiful silver watch you gave me for my 25th birthday. It matches perfectly with my professional wardrobe and I love wearing it to work.',
     maxLength: 150,
-    preferredAI: 'auto'
+    preferredAI: 'gemini'
   });
 
   const handleInputChange = (field: keyof EmailForm, value: string | number) => {
@@ -48,32 +50,79 @@ const EmailGenerator = () => {
     }));
   };
 
+  const hasGeminiKey = () => {
+    return !!(localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GOOGLE_API_KEY);
+  };
+
   const handleGenerate = async () => {
     setIsGenerating(true);
-    setGeneratedEmail(''); // Clear previous result to prevent duplication
-    setGenerationStatus('🔄 Generating your professional email...');
+    setGeneratedEmail('');
+    setUsedAI(null);
+    setGenerationStatus('🤖 Connecting to AI service...');
 
     try {
-      // Simulate AI generation delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      let email = '';
+      let aiUsed: 'gemini' | 'template' = 'template';
 
-      const email = generateEmail(form);
+      // Try Gemini AI first if available and preferred
+      if (form.preferredAI === 'gemini' && hasGeminiKey()) {
+        try {
+          setGenerationStatus('🧠 Generating with Google Gemini AI...');
+          email = await generateEmailWithGemini(form);
+          aiUsed = 'gemini';
+          console.log('Successfully generated email with Gemini AI');
+        } catch (error) {
+          console.error('Gemini AI failed, falling back to templates:', error);
+          setGenerationStatus('⚠️ AI unavailable, using smart templates...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          email = generateEmail(form);
+          aiUsed = 'template';
+          
+          toast({
+            title: "AI Service Unavailable",
+            description: "Using template system as fallback. Check your API key in Service Status.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        // Use template system
+        setGenerationStatus('📝 Generating with smart templates...');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        email = generateEmail(form);
+        aiUsed = 'template';
+        
+        if (form.preferredAI === 'gemini' && !hasGeminiKey()) {
+          toast({
+            title: "API Key Required",
+            description: "Configure your Gemini API key in Service Status to use AI generation.",
+          });
+        }
+      }
+      
       const timestamp = new Date().toLocaleTimeString();
-      
-      // Set results with single update to prevent duplication
       setGeneratedEmail(email);
-      setGenerationStatus(`✅ Generated with AI Template Engine at ${timestamp}`);
+      setUsedAI(aiUsed);
       
-      toast({
-        title: "Email Generated Successfully!",
-        description: "Your professional email is ready to use.",
-      });
+      if (aiUsed === 'gemini') {
+        setGenerationStatus(`✨ Generated with Google Gemini AI at ${timestamp}`);
+        toast({
+          title: "AI Email Generated!",
+          description: "Your personalized email has been created using Google Gemini.",
+        });
+      } else {
+        setGenerationStatus(`📋 Generated with Smart Templates at ${timestamp}`);
+        toast({
+          title: "Email Generated!",
+          description: "Your professional email is ready using our template system.",
+        });
+      }
+
     } catch (error) {
-      console.error('Email generation failed:', error);
+      console.error('Email generation failed completely:', error);
       setGenerationStatus(`❌ Generation failed at ${new Date().toLocaleTimeString()}`);
       toast({
         title: "Generation Failed",
-        description: "Please try again or check your inputs.",
+        description: "Please try again or check your settings.",
         variant: "destructive",
       });
     } finally {
@@ -109,6 +158,28 @@ const EmailGenerator = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* AI Preference */}
+          <div className="space-y-2">
+            <Label htmlFor="preferredAI">🤖 AI Generation</Label>
+            <Select value={form.preferredAI} onValueChange={(value) => handleInputChange('preferredAI', value)}>
+              <SelectTrigger className={!hasGeminiKey() ? "border-orange-300 bg-orange-50" : ""}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gemini">
+                  🧠 Google Gemini AI {!hasGeminiKey() && "(API Key Required)"}
+                </SelectItem>
+                <SelectItem value="template">📝 Smart Templates (Always Available)</SelectItem>
+              </SelectContent>
+            </Select>
+            {form.preferredAI === 'gemini' && !hasGeminiKey() && (
+              <div className="flex items-center gap-2 text-sm text-orange-600 bg-orange-50 p-2 rounded">
+                <AlertTriangle className="h-4 w-4" />
+                Configure API key in Service Status tab to use AI generation
+              </div>
+            )}
+          </div>
+
           {/* Email Purpose */}
           <div className="space-y-2">
             <Label htmlFor="purpose">📝 Email Purpose</Label>
@@ -137,21 +208,6 @@ const EmailGenerator = () => {
                 <SelectItem value="casual">Casual (Friendly)</SelectItem>
                 <SelectItem value="formal">Formal (Respectful)</SelectItem>
                 <SelectItem value="business">Business (Professional)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* AI Preference */}
-          <div className="space-y-2">
-            <Label htmlFor="preferredAI">🤖 AI Preference</Label>
-            <Select value={form.preferredAI} onValueChange={(value) => handleInputChange('preferredAI', value)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Auto (Recommended)</SelectItem>
-                <SelectItem value="gemini">Google Gemini</SelectItem>
-                <SelectItem value="huggingface">Hugging Face</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -207,7 +263,12 @@ const EmailGenerator = () => {
               placeholder="Be specific! The more details you provide, the better the AI can personalize your email."
               rows={4}
             />
-            <p className="text-sm text-gray-500">The more specific details you provide, the better the AI can personalize your email!</p>
+            <p className="text-sm text-gray-500">
+              {form.preferredAI === 'gemini' && hasGeminiKey() 
+                ? 'The AI will use these details to create a personalized, context-aware email!'
+                : 'These details will be incorporated into your professional email template.'
+              }
+            </p>
           </div>
 
           <div className="space-y-3">
@@ -240,7 +301,7 @@ const EmailGenerator = () => {
             ) : (
               <>
                 <Send className="mr-2 h-5 w-5" />
-                🚀 Generate AI Email
+                {form.preferredAI === 'gemini' && hasGeminiKey() ? '🤖 Generate AI Email' : '📝 Generate Email'}
               </>
             )}
           </Button>
@@ -253,6 +314,11 @@ const EmailGenerator = () => {
           <CardTitle className="flex items-center justify-between">
             <span className="flex items-center gap-2">
               📧 Generated Email
+              {usedAI && (
+                <Badge variant={usedAI === 'gemini' ? 'default' : 'secondary'} className="ml-2">
+                  {usedAI === 'gemini' ? '🤖 AI-Powered' : '📋 Template-Based'}
+                </Badge>
+              )}
             </span>
             {generatedEmail && (
               <Button onClick={copyToClipboard} variant="outline" size="sm">
@@ -266,8 +332,18 @@ const EmailGenerator = () => {
           <div className="space-y-4">
             {/* Generation Status */}
             {generationStatus && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm font-medium text-blue-800">{generationStatus}</p>
+              <div className={`p-3 border rounded-lg ${
+                usedAI === 'gemini' ? 'bg-blue-50 border-blue-200' : 
+                usedAI === 'template' ? 'bg-green-50 border-green-200' : 
+                'bg-gray-50 border-gray-200'
+              }`}>
+                <p className={`text-sm font-medium ${
+                  usedAI === 'gemini' ? 'text-blue-800' : 
+                  usedAI === 'template' ? 'text-green-800' : 
+                  'text-gray-800'
+                }`}>
+                  {generationStatus}
+                </p>
               </div>
             )}
 
@@ -287,23 +363,25 @@ const EmailGenerator = () => {
               <CardContent className="pt-6">
                 <h3 className="font-semibold mb-3 flex items-center gap-2">
                   <CheckCircle className="h-5 w-5 text-green-600" />
-                  ✨ AI Features
+                  ✨ AI vs Template Features
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <h4 className="font-medium text-blue-700 mb-2">🧠 Google Gemini:</h4>
+                    <h4 className="font-medium text-blue-700 mb-2">🤖 Google Gemini AI:</h4>
                     <ul className="space-y-1 text-gray-600">
-                      <li>• Advanced reasoning</li>
-                      <li>• Natural writing style</li>
-                      <li>• Complex communication</li>
+                      <li>• Unique content every time</li>
+                      <li>• Context-aware writing</li>
+                      <li>• Natural conversation flow</li>
+                      <li>• Adapts to your specific needs</li>
                     </ul>
                   </div>
                   <div>
-                    <h4 className="font-medium text-purple-700 mb-2">🤗 Hugging Face:</h4>
+                    <h4 className="font-medium text-green-700 mb-2">📝 Smart Templates:</h4>
                     <ul className="space-y-1 text-gray-600">
-                      <li>• Multiple models</li>
-                      <li>• Creative emails</li>
-                      <li>• Free to use</li>
+                      <li>• Always available</li>
+                      <li>• Professional structure</li>
+                      <li>• Fast generation</li>
+                      <li>• Reliable fallback</li>
                     </ul>
                   </div>
                 </div>
