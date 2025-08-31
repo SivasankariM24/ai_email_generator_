@@ -181,14 +181,6 @@ This project is licensed under the MIT License .
 
 ---
 
-## 👩‍💻 Author
-
-**Sivasankari M**
-- 🎓 B.E. Computer Science & Engineering | Anna University, MIT Campus
-- 🏆 Sub-committee Head - Cloud & Data Analytics | IoT Club
-- 💼 Aspiring Software Engineer | GenAI Enthusiast
-
----
 
 ## 🙏 Acknowledgments
 
